@@ -721,6 +721,7 @@ state inactive
                 string session = llList2String ( value_list, 1 ) + ".Session";
                 string players = llList2String ( value_list, 2 ) + ".Players";
                 string treatment = llList2String ( value_list, 3 );
+				string recordName = llList2String ( value_list, 4 );
                 
                 if ( session != "None" )
                 {
@@ -735,6 +736,10 @@ state inactive
                     TREATMENT_NAME = treatment;
                     update_treatment (  );
                 }
+				if ( recordName != "None" && recordName != "" )
+				{
+					RECORD_FOLDER = recordName;
+				}
                 
                 start_experiment (  );
             }
