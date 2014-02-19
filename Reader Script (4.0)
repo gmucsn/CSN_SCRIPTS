@@ -101,7 +101,7 @@ display_text ( integer active, integer time )
 	}
 	if ( RECORD_FOLDER )
 	{
-		text += "Folder: " + RECORD_FOLDER + "\n";
+		text += "Record Folder: " + RECORD_FOLDER + "\n";
 	}
 	if ( active )
 	{
@@ -411,9 +411,6 @@ update_treatment (  )
 			display_text ( 0, 0 );
 		}
 	}
-	
-	CHOSEN_TYPE = "";
-	display_dialog_main (  );
 }
 
 send_named_message ( integer channel, string message, string name )
@@ -597,12 +594,7 @@ state inactive
 			}
 			
 			// CHOOSE VARIABLE TO ASSIGN
-			else if ( message = "Players" )
-			{
-				CHOSEN_TYPE = message;
-				display_dialog_sublist ( USER_ID, message );
-			}
-			else if ( message == "Session" )
+			else if ( llListFindList ( [ "Players", "Session" ], [ message ] ) > -1 )
 			{
 				CHOSEN_TYPE = message;
 				display_dialog_sublist ( USER_ID, message );
@@ -652,6 +644,9 @@ state inactive
 				
 				display_text ( 0, 0 );
 				update_treatment (  );
+				
+				CHOSEN_TYPE = "";
+				display_dialog_main (  );
 			}
 			else if ( CHOSEN_TYPE == "Round" )
 			{
@@ -865,10 +860,10 @@ state active
 	{
 		string values = llGetHTTPHeader ( id, "x-query-string" );
 		
+		llHTTPResponse ( id, 200, "XXX" );
+		
 		if ( values == "=stop" )
 		{
-			llHTTPResponse ( id, 200, "XXX" );
-			
 			integer object_types_length = llGetListLength ( OBJECT_TYPES );
 			
 			for ( i = 0; i < object_types_length; i ++ )
