@@ -1,0 +1,229 @@
+// ##################################################
+// ############### ELEPHANT GUN SCRIPT ##############
+// ##################################################
+
+// VERSION 1.0
+
+// ##################################################
+// #################### CHANNELS ####################
+// ##################################################
+
+
+
+// ##################################################
+// #################### VARIABLES ###################
+// ##################################################
+
+key USER_ID;
+integer USER_INFORMATION;
+
+string BULLET_NAME = "Elephant Gun Bullet";
+string SHELL_NAME = "Elephant Gun Shell";
+string SHOT_SOUND = "Elephant Gun Shot";
+float BULLET_SPEED = 50.0;
+float SHELL_SPEED = 1.0;
+integer BULLET_DAMAGE = 50; // Passed to the bullet script via the rez param
+
+string AIM_ANIMATION = "AIM";
+string SHOT_ANIMATION = "SHOT";
+
+integer GUN_GRIP = ATTACH_RHAND;
+string GUN_GRIP_MESSAGE = "This weapon only fits in your right hand!";
+
+vector AIM_OFFSET_CONSTANT = < 0.0, 0.0, 0.84 >;
+
+integer ENABLE_BULLET;
+integer ENABLE_SHELL;
+integer ENABLE_SOUND;
+
+integer GUN_ARMED;
+vector GUN_AIM_OFFSET;
+
+integer REPEAT_DELAY = 2;
+
+
+// ##################################################
+// #################### FUNCTIONS ###################
+// ##################################################
+
+verify_inventory (  ) 
+{
+	if ( llGetInventoryKey ( BULLET_NAME ) != NULL_KEY ) 
+	{
+		ENABLE_BULLET = TRUE;
+	}
+	else
+	{
+		ENABLE_BULLET = FALSE;
+		llOwnerSay ( "Bullet not found: " + BULLET_NAME );
+	}
+	
+	if ( llGetInventoryKey ( SHELL_NAME ) != NULL_KEY ) 
+	{
+		ENABLE_SHELL = TRUE;
+	}
+	else
+	{
+		ENABLE_SHELL = FALSE;
+		llOwnerSay ( "Shell not found: " + SHELL_NAME );
+	}
+	
+	if ( llGetInventoryKey ( SHOT_SOUND ) != NULL_KEY ) 
+	{
+		ENABLE_SOUND = TRUE;
+	}
+	else
+	{
+		ENABLE_SOUND = FALSE;
+		llOwnerSay ( "Sound not found: " + SHOT_SOUND );
+	}
+}
+
+get_permissions (  ) 
+{
+	llRequestPermissions ( llGetOwner (  ) , PERMISSION_TAKE_CONTROLS | PERMISSION_TRIGGER_ANIMATION | PERMISSION_ATTACH | PERMISSION_TRACK_CAMERA );		
+}
+
+arm (  ) 
+{
+	GUN_ARMED = TRUE;
+	// llSay ( 0, "ARM" );
+	
+	llTakeControls ( CONTROL_ML_LBUTTON | CONTROL_LBUTTON | CONTROL_FWD | CONTROL_BACK | CONTROL_LEFT | CONTROL_RIGHT, TRUE, FALSE );
+	osAvatarPlayAnimation ( llDetectedKey ( 0 ) , AIM_ANIMATION );
+	
+}
+
+disarm (  ) 
+{
+	GUN_ARMED = FALSE;
+	// llSay ( 0, "DISARM" );
+	
+	osAvatarStopAnimation ( llDetectedKey ( 0 ) , AIM_ANIMATION );
+	llReleaseControls (  );
+}
+
+
+// ##################################################
+// #################### PROGRAM #####################
+// ##################################################
+
+default
+{ 
+	state_entry (  ) 
+	{
+		// llSay ( 0, "DEFAULT" );
+		
+		USER_ID = llDetectedKey ( 0 );
+		USER_INFORMATION = llGetAgentInfo ( USER_ID );
+		
+		verify_inventory (  );
+		get_permissions (  );
+	}
+	
+	attach ( key id ) 
+	{
+		// llSay ( 0, "ATTACH" );
+		
+		if ( id != NULL_KEY ) 
+		{
+			// ATTACHING
+			vector size = llGetAgentSize ( id );
+			
+			GUN_AIM_OFFSET = AIM_OFFSET_CONSTANT;
+			GUN_AIM_OFFSET.z *= size.z / 2.0;
+			
+			get_permissions (  );
+		}
+		else
+		{
+			// DETACHING
+			if ( GUN_ARMED ) 
+			{
+				disarm (  );
+			}
+		}
+	}
+	
+	run_time_permissions ( integer permissions ) 
+	{
+		// llSay ( 0, "RUNTIME" );
+		
+		if ( permissions & ( PERMISSION_TAKE_CONTROLS | PERMISSION_TRIGGER_ANIMATION | PERMISSION_ATTACH ) ) 
+		{
+			if ( !llGetAttached (  ) ) 
+			{
+				llAttachToAvatar ( GUN_GRIP );
+			}
+			else if ( llGetAttached (  ) != GUN_GRIP ) 
+			{
+				llOwnerSay ( GUN_GRIP_MESSAGE );
+				llDetachFromAvatar (  );
+			}
+			else
+			{
+				verify_inventory (  );
+			}
+		}
+		else
+		{
+			llOwnerSay ( "Insufficient Permissions!" );
+			
+			if ( llGetAttached (  ) )
+			{
+				llDetachFromAvatar (  );
+			}
+		}  
+	}
+
+	control ( key id, integer levels, integer edges ) 
+	{
+		// llSay ( 0, "CONTROL" );
+		
+		USER_INFORMATION = llGetAgentInfo ( USER_ID );
+		
+		if ( USER_INFORMATION != AGENT_MOUSELOOK )
+		{
+			// MOUSE PRESS
+			if ( ( levels & CONTROL_ML_LBUTTON ) && ( edges & CONTROL_ML_LBUTTON ) ) 
+			{
+			}
+		}
+		
+		if ( USER_INFORMATION & AGENT_MOUSELOOK )
+		{
+			if ( ( levels & CONTROL_ML_LBUTTON ) && ( edges & CONTROL_ML_LBUTTON ) ) 
+			{
+			}
+
+			// MOUSE RELEASE
+			if ( ! ( levels & CONTROL_ML_LBUTTON ) && ( edges & CONTROL_ML_LBUTTON ) ) 
+			{
+				if ( ENABLE_SOUND )
+				{
+					llTriggerSound ( SHOT_SOUND, 1.0 );
+				}
+				
+				osAvatarPlayAnimation ( llDetectedKey ( 0 ) , SHOT_ANIMATION );
+				
+				rotation rotated = llGetRot (  );
+				vector aim_front = llRot2Fwd ( rotated );
+				vector aim_side = llRot2Left ( rotated );
+				vector bullet_position = llGetPos (  ) + GUN_AIM_OFFSET + ( aim_front * 1.0 );
+				vector shell_position = llGetPos (  ) + GUN_AIM_OFFSET + ( aim_side * 1.0 );
+				
+				llRezObject ( BULLET_NAME, bullet_position, aim_front * BULLET_SPEED, rotated, BULLET_DAMAGE );
+				llRezObject ( SHELL_NAME, shell_position, aim_side * SHELL_SPEED, rotated, BULLET_DAMAGE );
+				
+				llShout ( 0, "BANG!" );
+				
+				llSleep ( REPEAT_DELAY );	// PAUSES THE SCRIPT FOR A DELAY BETWEEN BULLETS
+			}
+			
+			// MOUSE DOWN
+			if ( ( levels & CONTROL_ML_LBUTTON ) && ! ( edges & CONTROL_ML_LBUTTON ) ) 
+			{
+			}
+		}
+	}
+}
