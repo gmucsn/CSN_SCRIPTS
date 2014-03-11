@@ -1,0 +1,159 @@
+// ##################################################
+// ##################################################
+// ################ BOILERPLATE SCRIPT ##############
+// ##################################################
+// ##################################################
+
+// VERSION 1.0
+
+// ##################################################
+// ##################### CHANNELS ###################
+// ##################################################
+
+integer FLEX_CHANNEL = 10;
+integer PUBLIC_CHANNEL = 0;
+integer ADMIN_CHANNEL = -1;
+integer MASTER_CHANNEL = -10;
+integer PRIVATE_CHANNEL = -20;
+integer REPORT_CHANNEL = -100;
+
+
+// ##################################################
+// #################### VARIABLES ###################
+// ##################################################
+
+key USER_ID = "";
+key MASTER_KEY = "";
+
+
+// ##################################################
+// #################### FUNCTIONS ###################
+// ##################################################
+
+start_up (  )
+{
+  MASTER_KEY = llGetOwner (  );
+  
+	llShout ( PUBLIC_CHANNEL, "RUNNING" );
+	llRegionSay ( MASTER_CHANNEL, "RUNNING" );
+	llRegionSay ( ADMIN_CHANNEL, "RUNNING" );
+}
+
+running_listen ( integer channel, string name, key id, string message )
+{
+	list message_list = llCSV2List ( message );
+	string message_type = llList2String ( message_list, 0 );
+	
+	if ( message_type == "ON" )
+	{
+		state active;
+	}
+	else if ( link_message_type == "OFF" ) 
+	{
+		state inactive;
+	}
+}
+
+running_link_message ( integer source_link_number, integer number, string link_message, key id )
+{
+	list link_message_list = llCSV2List ( link_message );
+	string link_message_type = llList2String ( link_message_list, 0 );
+	
+	if ( link_message_type == "ON" ) 
+	{
+		state active;
+	}
+	else if ( link_message_type == "OFF" ) 
+	{
+		state inactive;
+	}
+}
+
+// ##################################################
+// ##################### PROGRAM ####################
+// ##################################################
+
+default
+{
+	on_rez ( integer start_parameter )
+	{
+		llResetScript (  );
+	}
+	
+	attach ( key key_attached )
+	{
+		llResetScript (  );
+	}
+	
+	state_entry (  )
+	{
+		start_up (  );
+		
+		state inactive;
+	}
+}
+
+state inactive
+{
+	state_entry (  )
+	{
+		llListen ( FLEX_CHANNEL, "", NULL_KEY, "" );
+		llListen ( PUBLIC_CHANNEL, "", NULL_KEY, "" );
+		llListen ( ADMIN_CHANNEL, "", NULL_KEY, "" );
+		llListen ( MASTER_CHANNEL, "", NULL_KEY, "" );
+		llListen ( PRIVATE_CHANNEL, "", NULL_KEY, "" );
+	}
+	
+	touch_start ( integer number ) 
+	{
+		USER_ID = llDetectedKey ( 0 );
+	}
+	
+	listen ( integer channel, string name, key id, string message )
+	{
+		running_listen ( channel, name, id, message );
+	}
+	
+	link_message ( integer source_link_number, integer number, string link_message, key id )
+	{
+		running_link_message ( source_link_number, number, string link_message, key id )
+	}
+	
+	timer (  )
+	{
+		
+	}
+}
+
+state active
+{
+	state_entry (  )
+	{
+		llListen ( FLEX_CHANNEL, "", NULL_KEY, "" );
+		llListen ( PUBLIC_CHANNEL, "", NULL_KEY, "" );
+		llListen ( ADMIN_CHANNEL, "", NULL_KEY, "" );
+		llListen ( MASTER_CHANNEL, "", NULL_KEY, "" );
+		llListen ( PRIVATE_CHANNEL, "", NULL_KEY, "" );
+	}
+	
+	touch_start ( integer number ) 
+	{
+		USER_ID = llDetectedKey ( 0 );
+	}
+	
+	listen ( integer channel, string name, key id, string message )
+	{
+		running_listen ( channel, name, id, message );
+	}
+	
+	link_message ( integer source_link_number, integer number, string link_message, key id )
+	{
+		running_link_message ( source_link_number, number, string link_message, key id )
+	}
+	
+	timer (  )
+	{
+		
+	}
+}
+
