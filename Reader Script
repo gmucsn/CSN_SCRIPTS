@@ -1,0 +1,1007 @@
+// ##################################################
+// ##################################################
+// ############### READER SCRIPT (4.2) ##############
+// ##################################################
+// ##################################################
+
+// 4.2: FIXED HOW THE SCRIPT CONNECTS TO THE EC2 SERVER
+// 4.1: ARBITRARY NOTECARD RECURSION AND SIMPLIFIED NOTECARD READING
+// 4.0: MERGED PETER AND EVANS VERSIONS
+// 3.8: ADDED GOOGLE APPLAUNCHER SUPPORT
+// 3.7: BRINGS UP A NEW MENU AT THE END OF CLILCKING DIALOG
+// 3.6: CLEANED
+// 3.5: ADDED ABILITY TO CALL LINES FROM PARAMETER FILE.
+// 3.3: ADDED RLV CONTROLS.
+// 3.2: FIXED ISSUE WITH LAG CAUSING BREAKS TO BE MISSED
+
+// ##################################################
+// #################### CHANNELS ####################
+// ##################################################
+
+// ALL CHANNELS ARE RESET BY THE .SESSION NOTECARD ( "$,CHANNEL,0,-1,-10,-100" )
+
+integer PUBLIC_CHANNEL = 0; // 0 ( FOR SENDING USERS - BUT NOT THEIR ATTACHMENTS OR HUDS - MESSAGES USING llRegionSayTo )
+integer ADMIN_CHANNEL = -1; // -1 ( FOR RECEIVING MESSAGES FROM llDialog AND llTextBox, AND "BREAK" MESSAGE )
+integer MASTER_CHANNEL = -10; // -10 ( FOR GIVING PUBLIC MESSAGES TO OBJECTS )
+integer PRIVATE_CHANNEL = -20; // -10 ( FOR GIVING PRIVATE MESSAGES TO OBJECTS )
+integer REPORT_CHANNEL = -100; // -100 ( FOR RECEIVING MESSAGES FROM OBJECTS TO REPORT TO THE SERVER )
+
+
+// ##################################################
+// #################### VARIABLES ###################
+// ##################################################
+
+key USER_ID;
+list ADMINS = [ "Kevin McCabe", "Peter Twieg", "Evans Love", "Billy Grasmeder" ];
+list OBJECT_TYPES = [  ];
+list DIALOG_LIST = [  ];
+
+list SESSION_LIST; // TRACKS LIST OF ALL .Session NOTECARDS
+string SESSION_NAME; // NAME OF .Session NOTECARD FROM DialogBox
+list TREATMENT_LIST; // Tracks list of all .Treatment NOTECARDS
+string TREATMENT_NAME; // NAME OF .Treatment NOTECARD FROM TextBox
+string PLAYER_NAME; // NAME OF .Player NOTECARD FROM DialogBox
+list PLAYER_LIST; // STORES PLAYER NAMES FOR INSTRUCTIONS
+
+string READING_NAME; // NAME OF NOTECARD ACTUALLY BEING READ
+string CHOSEN_TYPE; // WHAT TYPE OF NOTECARD IS BEING CONSIDERED
+string MESSAGE_TYPE; // WHICH TYPE OF MESSAGES TO RELAY TO ADMIN
+
+string RECORD_URL = "";
+string RECORD_URL_BASE = "http://54.204.88.101/record?"; // URL
+string RECORD_URL_KEY = "KbBkRJnR";
+string EXPERIMENT_FOLDER = "UNLABELED";
+string SESSION_FOLDER = "UNLABELED";
+
+string METAMASTER_URL = "http://slmetamaster.appspot.com/register";
+
+integer DESTINATION_TIME;
+integer PAUSED;
+
+list READING_NAMES = [ "" ]; // LIST OF EACH NESTED NOTECARD NAME
+list CURRENT_LINES = [ 0 ]; // LIST OF CURRENT LINES FOR EACH LEVEL OF NOTECARD RECURSION
+integer CURRENT_LINE;
+integer CURRENT_LINE_LEVEL; // CURRENT LEVEL OF NOTECARD RECURSION - 0 IF IN MAIN NOTECARD, 1 IF IN A SUBNOTECARD, etc.
+integer MAX_LINE = -1; // IF THIS IS > -1, THEN THE READER WILL ONLY READ TO THAT LINE AND THEN BREAK OUT
+
+integer LOOP_LINE; // IF A LOOP IS SPECIFIED, JUMP BACK HERE WHEN BREAK IS DONE
+integer LOOP_COUNTER; // THE NUMBER OF TIMES THE LOOP HAS RUN
+integer STARTING_LOOP_COUNTER = 1;  // THE LOCATION OF THE STARTING LOOP VALUE (BY DEFAULT IT IS 1)
+integer BREAK; // BREAK OUT OF LOOP
+
+integer i; // LOCAL LOOP VARIABLE 1
+integer j; // LOCAL LOOP VARIABLE 2
+
+integer BACKUP_ON;
+
+
+// ##################################################
+// #################### FUNCTIONS ###################
+// ##################################################
+
+start_up (  )
+{
+	llRequestURL (  );
+}
+
+display_text ( integer active, integer time )
+{
+	string text;
+
+	if ( SESSION_NAME )
+	{
+		text += "Session: " + SESSION_NAME + "\n";
+	}
+	if ( PLAYER_NAME )
+	{
+		text += "Players: " + PLAYER_NAME + "\n";
+	}
+	if ( TREATMENT_NAME )
+	{
+		text += "Treatment: " + TREATMENT_NAME + ".Treatment\n";
+	}
+	if ( EXPERIMENT_FOLDER )
+	{
+		text += "Experiment Folder: " + EXPERIMENT_FOLDER + "\n";
+	}
+	if ( SESSION_FOLDER )
+	{
+		text += "Session Folder: " + SESSION_FOLDER + "\n";
+	}
+	if ( STARTING_LOOP_COUNTER || STARTING_LOOP_COUNTER == 0 )
+	{
+		text += "Starting Round: " + (string) STARTING_LOOP_COUNTER + "\n";
+	}
+	if ( active )
+	{
+		text += "\n \nSession running!";
+	}
+	if ( time )
+	{
+		text += "\n \nNext Event: " + event_time ( time );
+	}
+	
+	llSetText ( text, < 1.0, 1.0, 1.0 >, 1.0 );
+}
+
+string url_parser ( string url )
+{
+	string prefix = "http://74.63.237.42";
+	list url_split = llParseString2List ( url, [ ":" ], [  ] );
+	
+	string fixed = prefix + ":" + llList2String ( url_split, 2 );
+	
+	return fixed;
+}
+
+float process_notecard_data ( string data ) 
+{
+	// llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
+	
+	list data_list = llCSV2List ( data );
+	string data_type = llList2String ( data_list, 0 ); 
+	
+	// TIMER INFORMATION
+	if ( data_type == "." )
+	{
+		string value = llList2String ( data_list, 1 );
+		
+		display_text ( 1, (integer) value );
+		llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "LINE," + (string) CURRENT_LINE + "," + value, NULL_KEY );
+		
+		return (float) value;
+	}
+	
+	// PASSES MESSAGE TO EXPERIMENT SCRIPT IN THE SAME PRIM
+	else if ( data_type == "!" )
+	{
+		llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, llList2CSV ( llList2List ( data_list, 1, -1 ) ), NULL_KEY );
+	}
+	
+	// MOVES READER SCRIPT TO LOOK AT SPECIFIC NOTECARDS
+	else if ( data_type == "?" )
+	{
+		// SPECIFIC NOTECARD 1 (SUBLEVEL 0)
+		if ( llList2String ( data_list, 1 ) == "PLAYERS" )
+		{
+			READING_NAME = PLAYER_NAME;
+			READING_NAMES += READING_NAME;
+			CURRENT_LINES = llListReplaceList ( CURRENT_LINES, [ CURRENT_LINE ], CURRENT_LINE_LEVEL, CURRENT_LINE_LEVEL );
+			CURRENT_LINES += 0;
+			CURRENT_LINE = 0;
+			CURRENT_LINE_LEVEL ++;
+		}
+		// SPECIFIC NOTECARD 2 (SUBLEVEL 0)
+		else if ( llList2String ( data_list, 1 ) == "TREATMENT" )
+		{
+			READING_NAME = llList2String ( TREATMENT_LIST, (integer) llList2String ( data_list, 2 ) -1 );
+			READING_NAMES += READING_NAME;
+			CURRENT_LINES = llListReplaceList ( CURRENT_LINES, [ CURRENT_LINE ], CURRENT_LINE_LEVEL, CURRENT_LINE_LEVEL );
+			CURRENT_LINES += 0;
+			CURRENT_LINE = 0;
+			CURRENT_LINE_LEVEL ++;
+		}
+		// SPECIFIC NOTECARD 3 (SUBLEVEL 1)
+		else if ( llList2String ( data_list, 1 ) == "PARAMETER" )
+		{
+			integer number = 0;
+			string file_name = llList2String ( data_list, 2 ) + ".Parameter";
+			
+			if ( llGetSubString ( llList2String ( data_list, 3 ), 0, 0 ) == "X" )
+			{
+				number = LOOP_COUNTER;
+			}
+			else
+			{
+				number = (integer) llList2String ( data_list, 3 );
+			}
+			
+			READING_NAME = file_name;
+			READING_NAMES += READING_NAME;
+			CURRENT_LINES = llListReplaceList ( CURRENT_LINES, [ CURRENT_LINE ], CURRENT_LINE_LEVEL, CURRENT_LINE_LEVEL );
+			CURRENT_LINES += number;
+			CURRENT_LINE = number;
+			CURRENT_LINE_LEVEL ++;
+			MAX_LINE = CURRENT_LINE;
+		}
+	}
+	
+	// PASSES MESSAGE TO REGION
+	else if ( data_type == "#" ) 
+	{
+		string target = llList2String ( data_list, 1 );
+		
+		send_named_message ( MASTER_CHANNEL, llList2CSV ( llList2List ( data_list, 2, -1 ) ), target );
+	}
+	
+	// PARSED BY THE READER SCRIPT.
+	else if ( data_type == "$" )
+	{
+		string command_type = llList2String ( data_list, 1 );
+		
+		// DETERMINES CHANNELS FOR THE GIVEN EXPERIMENT
+		if ( command_type == "CHANNEL" )
+		{
+			PUBLIC_CHANNEL = llList2Integer ( data_list, 2 );
+			ADMIN_CHANNEL = llList2Integer ( data_list, 3 );
+			MASTER_CHANNEL = llList2Integer ( data_list, 4 );
+			PRIVATE_CHANNEL = llList2Integer ( data_list, 5 );
+			REPORT_CHANNEL = llList2Integer ( data_list, 6 );
+		}
+		
+		// DETERMINES LIST OF OBJECT TYPES THAT WILL RECEIVE TERMINATE MESSAGES
+		else if ( command_type == "TYPES" )
+		{
+			OBJECT_TYPES = llParseString2List ( llList2String ( data_list, 2 ), [ ";" ], [  ] );
+		}
+		
+		// DETERMINES WHAT LINE TO JUMP TO IN THE SESSION NOTECARD
+		else if ( command_type == "JUMP" )
+		{
+			string starting_line = llList2String ( data_list, 2 );
+			
+			if ( starting_line != "X" )
+			{
+				CURRENT_LINE = (integer) starting_line;
+			}
+			
+			llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "START_COUNTER," + (string) STARTING_LOOP_COUNTER, NULL_KEY ); // MASTER LISTENS FOR START_COUNER. WHEN IT RECEIVES THE MESSAGE IT MUST ADD 1 TO THAT VALUE THE ACTUAL ROUND THAT WILL BE STARTED.
+		}
+		
+		else if ( command_type == "LOOP" )
+		{
+			LOOP_LINE = CURRENT_LINE;
+			LOOP_COUNTER = STARTING_LOOP_COUNTER - 1;
+			BREAK = 0;
+		}		
+		else if ( command_type == "BREAK_CHECK" )
+		{
+			if ( !BREAK )
+			{
+				CURRENT_LINE = LOOP_LINE;
+				LOOP_COUNTER += 1;
+			}
+		}
+		
+		// USED FOR RESTORING BACKED UP DATA FROM THE MASTERBOX
+		else if ( command_type == "BACKUP" )
+		{
+			// llSetTimerEvent ( 0.0 ); // STOPS READING UNTIL BACKUP REPORTS BACK
+			llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "RESTORE_BACKUP," + (string) BACKUP_ON, NULL_KEY );
+			
+			BACKUP_ON = 0;
+		}
+		else if ( command_type == "BACKUP_CHECK" )
+		{
+			llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "BACKUP_CHECK," + (string) BACKUP_ON, NULL_KEY );
+		}
+	}
+	
+	display_text ( 1, 0 );
+	return 0.01;
+}
+
+display_dialog_main (  )
+{
+	CHOSEN_TYPE = "";
+	list dialog_list = [ "Session", "Treatment", "Players", "Exp Folder", "Ses Folder", "Round" ];
+	
+	if ( PLAYER_NAME && SESSION_NAME && TREATMENT_NAME )
+	{
+		dialog_list += [ "Start", "RLVOn", "RLVOff" ];
+	}
+	
+	if ( BACKUP_ON )
+	{
+		dialog_list += [ "Backup Off", "Clear Backup" ];
+	}
+	else
+	{
+		dialog_list += [ "Backup On", "Clear Backup" ];
+	}
+	
+	if ( SESSION_NAME )
+	{
+		SESSION_NAME = llDeleteSubString ( SESSION_NAME, -8, -1 );
+	}
+	if ( PLAYER_NAME )
+	{
+		PLAYER_NAME = llDeleteSubString ( PLAYER_NAME, -8, -1 );
+	}
+	
+	llDialog ( USER_ID, "Session: " + SESSION_NAME + "\nTreatment: " + TREATMENT_NAME + "\nPlayers: " + PLAYER_NAME + "\nExperiment Folder: " + EXPERIMENT_FOLDER + "\nSession Folder: " + SESSION_FOLDER + "\nStarting Round: " + (string) STARTING_LOOP_COUNTER + "\n \nPlease choose an action:", dialog_list, ADMIN_CHANNEL );
+	
+	if ( SESSION_NAME )
+	{
+		SESSION_NAME = SESSION_NAME + ".Session";
+	}
+	if ( PLAYER_NAME )
+	{
+		PLAYER_NAME = PLAYER_NAME + ".Players";
+	}
+}
+
+display_dialog_sublist ( key user_id, string type )
+{
+	DIALOG_LIST = [  ];
+	
+	integer number_of_notecards = llGetInventoryNumber ( INVENTORY_NOTECARD );
+	
+	for ( i = 0; i < number_of_notecards; i ++ )
+	{
+		string full_name = llGetInventoryName ( INVENTORY_NOTECARD, i );
+		
+		if ( llGetListLength ( llParseString2List ( full_name, [ "." ], [  ] ) ) > 1 )
+		{
+			string card_type = llList2String ( llParseString2List ( full_name, [ "." ], [  ] ), 1 );
+			string card_name = llList2String ( llParseString2List ( full_name, [ "." ], [  ] ), 0 );
+
+			if ( type == card_type )
+			{
+				DIALOG_LIST += card_name;
+			}
+		}
+	}
+	
+	llDialog ( USER_ID, "Which " + type + " file do you wish to use?", DIALOG_LIST, ADMIN_CHANNEL );
+}
+
+start_experiment (  )
+{
+	display_text ( 0, 0 );
+	
+	if ( PLAYER_NAME && TREATMENT_NAME && SESSION_NAME )
+	{
+		if ( USER_ID )
+		{
+			llInstantMessage ( USER_ID, "Starting!" );
+		}
+		if ( !( EXPERIMENT_FOLDER && SESSION_FOLDER ) && USER_ID )
+		{
+			llInstantMessage ( USER_ID, "WARNING! EXPERIMENT FOLDER AND SESSION FOLDER NOT SPECIFIED!" );
+		}
+		state active;
+	}
+	else if ( USER_ID )
+	{
+		llInstantMessage ( USER_ID, "You need to choose all the files first!" );
+		display_dialog_main (  );
+	}
+}
+
+terminate_experiment (  )
+{
+	// llResetScript (  );
+	
+	llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "TERMINATE", NULL_KEY );
+	
+	integer object_types_length = llGetListLength ( OBJECT_TYPES );
+	
+	for ( i = 0; i < object_types_length; i ++ )
+	{
+		process_notecard_data ( "#," + llList2String ( OBJECT_TYPES, i ) + ",ACTIVE,0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0" );
+	}
+
+	// PLAYER_NAME = "";
+	// SESSION_NAME = "";
+	// TREATMENT_NAME = "";
+	// EXPERIMENT_FOLDER = "";
+	// SESSION_FOLDER = "";
+	
+	READING_NAMES = [ SESSION_NAME ];
+	CURRENT_LINES = [ 0 ];
+	CURRENT_LINE = 0;
+	CURRENT_LINE_LEVEL = 0;
+	MAX_LINE = -1;
+	LOOP_LINE = 0;
+	LOOP_COUNTER = 0;
+	STARTING_LOOP_COUNTER = 1;
+	
+	i = 0;
+	j = 0;
+	
+	display_text ( 0, 0 );
+
+	state default;
+}
+
+update_treatment (  )
+{
+	display_text ( 0, 0 );
+
+	TREATMENT_LIST = [  ];
+	integer treatment_name_length = llStringLength ( TREATMENT_NAME );
+	
+	for ( i = 0; i < treatment_name_length; i ++ )
+	{
+		TREATMENT_LIST += "";
+		integer number_of_notecards = llGetInventoryNumber ( INVENTORY_NOTECARD );	
+		
+		for ( j = 0; j < number_of_notecards; j ++ )
+		{
+			string full_name = llGetInventoryName ( INVENTORY_NOTECARD, j );
+			string match = llGetSubString ( TREATMENT_NAME, i, i );
+			
+			if ( llGetSubString ( full_name, 0, 0 ) == (string) ( i + 1 ) && llGetSubString ( full_name, 2, 2 ) == match && llSubStringIndex ( full_name, ".Treatment" ) > -1 )
+			{
+				TREATMENT_LIST = llListReplaceList ( TREATMENT_LIST, [ full_name ], -1, -1 );
+				
+				if ( USER_ID )
+				{
+					llInstantMessage ( USER_ID, "Match found at " + (string) ( i + 1 ) );
+				}
+			}
+		}
+		
+		if ( llList2String ( TREATMENT_LIST, -1 ) == "" )
+		{
+			if ( USER_ID )
+			{
+				llInstantMessage ( USER_ID, "Error: No match found at " + (string) ( i + 1 ) );
+			}
+			
+			TREATMENT_NAME = "";
+			display_text ( 0, 0 );
+		}
+	}
+}
+
+send_named_message ( integer channel, string message, string name )
+{
+	string old_name = llGetObjectName (  );
+	llSetObjectName ( "TO_" + name );
+	llRegionSay ( channel, message );
+	// llInstantMessage ( USER_ID, message );
+	llSetObjectName ( old_name );
+}
+
+string event_time ( integer time )
+{
+	string current = llGetTimestamp (  );
+	
+	integer hours = (integer) llGetSubString ( current, 11, 12 );
+	integer minutes = (integer) llGetSubString ( current, 14, 15 );
+	integer seconds = (integer) llGetSubString ( current, 17, 18 );
+	
+	integer hours_increment = time / 3600 + hours;
+	integer minutes_increment = ( time % 3600 ) / 60 + minutes;
+	integer seconds_increment = time % 60 + seconds;
+	
+	if ( seconds_increment > 59 )
+	{
+		minutes_increment += 1;
+		seconds_increment = seconds_increment % 60;
+	}
+	if ( minutes_increment > 59 )
+	{
+		hours_increment += 1;
+		minutes_increment = minutes_increment % 60;
+	}
+	if ( hours_increment > 23 )
+	{
+		hours_increment = hours_increment % 24;
+	}
+	
+	list increment_string = [ (string) hours_increment, (string) minutes_increment, (string) seconds_increment ];
+	integer increment_string_length = llGetListLength ( increment_string );
+	
+	for ( i = 0; i < increment_string_length; i ++ )
+	{
+		if ( llStringLength ( llList2String ( increment_string, i ) ) == 1 )
+		{
+			increment_string = llListReplaceList ( increment_string, [ "0" + llList2String ( increment_string, i ) ], i, i );
+		}
+	}
+	
+	return llList2String ( increment_string, 0 ) + ":" + llList2String ( increment_string, 1 ) + ":" + llList2String ( increment_string, 2 );
+}
+
+report ( string data )
+{
+	// llOwnerSay ( data );
+	
+	data = llGetUnixTime (  ) + "," + data;
+	
+	if ( EXPERIMENT_FOLDER && SESSION_FOLDER )
+	{
+		llHTTPRequest ( RECORD_URL, [ HTTP_METHOD, "POST" ], data );
+	}
+	
+	if ( MESSAGE_TYPE == "Report_All" && USER_ID )
+	{
+		llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
+	}
+	else if ( MESSAGE_TYPE == "Report_Chat" && llSubStringIndex ( data, ",CHAT," ) > 0 && USER_ID )
+	{
+		llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
+	}
+}
+
+
+// ##################################################
+// #################### PROGRAM #####################
+// ##################################################   
+
+default
+{
+	on_rez ( integer number )
+	{
+		llResetScript (  );
+	}
+	
+	attach ( key attached_key )
+	{
+		llResetScript (  );
+	}
+	
+	state_entry (  )
+	{
+		start_up (  );
+	}
+	
+	http_request ( key id, string method, string body ) // GET URL FOR THE PRIM THAT THE READER SCRIPT IS IN
+	{
+		if ( method == URL_REQUEST_GRANTED )
+		{
+			string my_url = url_parser ( body );
+			string message = "?url=" + my_url + "&region=" + llGetRegionName (  );
+			
+			llHTTPRequest ( METAMASTER_URL + message, [ HTTP_METHOD, "POST" ], "XXX");
+			// llSay ( 0, METAMASTER_URL + message );
+			
+			state inactive;
+		}
+	}
+}
+
+state inactive
+{
+	state_entry (  )
+	{
+		PAUSED = 0;
+		integer LISTEN_HANDLE_ADMIN = llListen ( ADMIN_CHANNEL, "", llGetOwner (  ), "" );
+		
+		display_text ( 0, 0 );
+		
+		RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&session=" + "UNLABELED" + "&experiment=" + "LOST" + "_" + llGetUnixTime (  );
+	}
+	
+	touch_start ( integer number )
+	{
+		if ( llListFindList ( ADMINS, [ llDetectedName ( 0 ) ] ) > -1 )
+		{
+			USER_ID = llDetectedKey ( 0 );
+			display_dialog_main (  );
+		}
+	}
+	
+	listen ( integer channel, string name, key id, string message )
+	{
+		if ( channel == ADMIN_CHANNEL )
+		{
+			// START EXPERIMENT
+			if ( message == "Start" )
+			{
+				start_experiment (  );
+			}
+			
+			// TERMINATE EXPERIMENT
+			else if ( message == "Terminate" )
+			{
+				terminate_experiment (  );
+			}
+			
+			// REQUEST NEW URL
+			else if ( message == "Update URL" )
+			{
+				llRequestURL (  );
+			}
+			
+			// BACKUP
+			else if ( message == "Backup On" )
+			{
+				BACKUP_ON = 1;
+				display_dialog_main (  );
+			}
+			else if ( message == "Backup Off" )
+			{
+				BACKUP_ON = 0;
+				display_dialog_main (  );
+			}
+			else if ( message == "Clear Backup" )
+			{
+				llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "CLEAR_BACKUP", NULL_KEY );
+				display_dialog_main (  );
+			}
+			
+			// RLV CONTROLS
+			else if ( message == "RLVOn" )
+			{
+				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1", "HUD" );
+				display_dialog_main (  );
+			}
+			else if ( message == "RLVOff" )
+			{
+				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0", "HUD" );
+				display_dialog_main (  );
+			}
+			
+			// CHOOSE VARIABLE TO ASSIGN
+			else if ( llListFindList ( [ "Players", "Session" ], [ message ] ) > -1 )
+			{
+				CHOSEN_TYPE = message;
+				display_dialog_sublist ( USER_ID, message );
+			}
+			else if ( message == "Treatment" )
+			{
+				CHOSEN_TYPE = message;
+				llTextBox ( USER_ID, "Choose a treatment combination:", ADMIN_CHANNEL );
+			}
+			else if ( message == "Exp Folder" )
+			{
+				CHOSEN_TYPE = message;
+				llTextBox ( USER_ID, "Choose an Experiment Folder to record to:", ADMIN_CHANNEL );
+			}
+			else if ( message == "Ses Folder" )
+			{
+				CHOSEN_TYPE = message;
+				llTextBox ( USER_ID, "Choose a Session Folder to record to:", ADMIN_CHANNEL );
+			}
+			else if ( message == "Round" )
+			{
+				CHOSEN_TYPE = message;
+				llTextBox ( USER_ID, "The current starting Round is " + (string) STARTING_LOOP_COUNTER + ".", ADMIN_CHANNEL );
+			}
+			
+			// ASSIGN CHOSEN VARIABLE
+			else if ( llListFindList ( DIALOG_LIST, [ message ] ) > -1 )
+			{
+				if ( CHOSEN_TYPE == "Players" )
+				{
+					PLAYER_NAME = message + ".Players";
+					
+					display_text ( 0, 0 );
+				}
+				else if ( CHOSEN_TYPE == "Session" )
+				{
+					SESSION_NAME = message + ".Session";
+					READING_NAMES = [ SESSION_NAME ];
+					
+					display_text ( 0, 0 );
+				}
+				else
+				{
+					llInstantMessage ( USER_ID, "Invalid file chosen!" );
+				}
+				
+				CHOSEN_TYPE = "";
+				display_dialog_main (  );
+			}
+			else if ( CHOSEN_TYPE == "Treatment" )
+			{
+				TREATMENT_NAME = message;
+				
+				display_text ( 0, 0 );
+				update_treatment (  );
+				
+				CHOSEN_TYPE = "";
+				display_dialog_main (  );
+			}
+			else if ( CHOSEN_TYPE == "Round" )
+			{
+				integer value = (integer) message;
+				STARTING_LOOP_COUNTER = ( ( llAbs ( 1 >= value ) ) * value ) + ( llAbs( 1 < value ) );  // SETS STARTING_LOOP_COUNTER TO BE AT LEAST 1
+				
+				llInstantMessage ( USER_ID, "The starting Round is now " + message );
+				
+				display_text ( 0, 0 );
+				
+				CHOSEN_TYPE = "";
+				display_dialog_main (  );
+			}
+			else if ( CHOSEN_TYPE == "Exp Folder" || CHOSEN_TYPE == "Ses Folder" )
+			{
+				if ( CHOSEN_TYPE == "Exp Folder" )
+				{
+					EXPERIMENT_FOLDER = message;
+				}
+				else if ( CHOSEN_TYPE == "Ses Folder" )
+				{
+					SESSION_FOLDER = message;
+				}
+					
+				display_text ( 0, 0 );
+				
+				CHOSEN_TYPE = "";
+				display_dialog_main (  );
+			}
+		}
+	}
+	
+	http_request ( key id, string method, string body )
+	{
+		if ( method == URL_REQUEST_GRANTED )
+		{
+			string my_url = url_parser ( body );
+			string message = "?url=" + my_url + "&region=" + llGetRegionName (  );
+			
+			llHTTPRequest ( METAMASTER_URL + message, [ HTTP_METHOD, "POST" ], "XXX" );
+			// llSay ( 0, METAMASTER_URL + message );
+		}
+		else
+		{
+			llHTTPResponse ( id, 200, "XXX" );
+			string values = llGetHTTPHeader ( id, "x-query-string" );
+			
+			// llSay ( 0, values );
+			
+			list value_list = llCSV2List ( values );
+			
+			if ( llList2String ( value_list, 0 ) == "=start" )
+			{
+				string session = llList2String ( value_list, 1 ) + ".Session";
+				string players = llList2String ( value_list, 2 ) + ".Players";
+				string treatment = llList2String ( value_list, 3 );
+				string session_folder_name = llList2String ( value_list, 4 );
+				string experiment_folder_name = llList2String ( value_list, 5 );
+				
+				if ( session != "None" )
+				{
+					SESSION_NAME = session;
+				}
+				if ( players != "None" )
+				{
+					PLAYER_NAME = players;
+				}
+				if ( treatment != "None" )
+				{
+					TREATMENT_NAME = treatment;
+					update_treatment (  );
+				}
+				if ( session_folder_name != "None" && session_folder_name != "" )
+				{
+					SESSION_FOLDER = session_folder_name;
+				}
+				if ( experiment_folder_name != "None" && experiment_folder_name != "" )
+				{
+					EXPERIMENT_FOLDER = experiment_folder_name;
+				}
+				
+				start_experiment (  );
+			}
+		}
+	}
+}
+
+state active
+{
+	state_entry (  )
+	{
+		display_text ( 1, 0 );
+		
+		RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&session=" + SESSION_FOLDER + "&experiment=" + EXPERIMENT_FOLDER + "_" + (string) llGetUnixTime (  );
+		
+		READING_NAMES = [ SESSION_NAME ];
+		CURRENT_LINES = [ 0 ];
+		CURRENT_LINE = 0;
+		CURRENT_LINE_LEVEL = 0;
+		MAX_LINE = -1;
+		LOOP_COUNTER = STARTING_LOOP_COUNTER - 1;
+		DESTINATION_TIME = 0;
+		READING_NAME = SESSION_NAME;
+		MESSAGE_TYPE = "Report_All";
+		
+		integer LISTEN_HANDLE_ADMIN = llListen ( ADMIN_CHANNEL, "", NULL_KEY, "" );
+		integer LISTEN_HANDLE_REPORT = llListen ( REPORT_CHANNEL, "", NULL_KEY, "" );
+		
+		llSetTimerEvent ( 1.0 ); // INITIALIZES READING OF PARAMETER FILE
+	}
+	
+	touch_start ( integer number )
+	{
+		if ( llListFindList ( ADMINS, [ llDetectedName ( 0 ) ] ) > -1 )
+		{
+			string dialog_message = "";
+			list dialog_list = [ "Report_All", "Report_Chat", "Report_Off" ];
+			
+			if ( PAUSED )
+			{
+				dialog_list += "Unpause";
+				dialog_message = SESSION_NAME + " paused. Please choose an option.";
+			}
+			else
+			{
+				dialog_list += "Pause";
+				dialog_message = SESSION_NAME + " running. Please choose an option.";
+			}
+			
+			dialog_list += [ "Next", "Terminate", "RLVOn", "RLVOff" ];
+			
+			llDialog ( llDetectedKey ( 0 ), SESSION_NAME + " running. Please choose an option:", dialog_list, ADMIN_CHANNEL );
+		}
+	}  
+	
+	listen ( integer channel, string name, key id, string message )
+	{
+		if ( channel == ADMIN_CHANNEL )
+		{
+			// TERMINATE EXPERIMENT
+			if ( message == "Terminate" ) // IF TERMINATE CHOSEN, SENDS OUT END MESSAGE TO ALL VALID OBJECTS
+			{
+				terminate_experiment (  );
+			}
+			
+			else if ( message == "RLVOn" )
+			{
+				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1", "HUD" );
+			}
+			
+			else if ( message == "RLVOff" )
+			{
+				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0", "HUD" );
+			}
+			
+			else if ( message == "Pause" )
+			{
+				PAUSED = DESTINATION_TIME - llGetUnixTime (  );
+				
+				if ( PAUSED < 1 )
+				{
+					PAUSED = 1;
+				}
+				
+				llSetTimerEvent ( 0.0 );
+			}
+			
+			else if ( message == "Unpause" )
+			{
+				DESTINATION_TIME = llGetUnixTime (  ) + PAUSED;
+				PAUSED = 0;
+				
+				llSetTimerEvent ( 1.0 );
+			}
+			
+			else if ( llListFindList ( [ "Report_All", "Report_Chat", "Report_Off" ], [ message ] ) > -1 )
+			{
+				MESSAGE_TYPE = message;
+			}
+			
+			else if ( message == "Next" ) // SKIPS TO NEXT LINE IN THE PARAMETER FILE WITHOUT WAITING
+			{
+				DESTINATION_TIME = 0;
+			}
+		}
+		
+		else if ( channel == REPORT_CHANNEL )
+		{
+			report ( message );
+		}
+	}
+	
+	link_message ( integer sender, integer number, string message, key id )
+	{
+		if ( number == ADMIN_CHANNEL )  // ONLY LISTENS TO MESSAGES WITH THE PROPER NUMBER, NUMBER IN THIS CASE IS "ADMIN_CHANNEL"
+		{
+			list message_list = llCSV2List ( message );
+			
+			if ( message == "Next" )
+			{
+				DESTINATION_TIME = 0;
+			}
+			
+			else if ( llList2String ( message_list, 0 ) == "BREAK" )
+			{
+				BREAK = (integer) llList2String ( message_list, 1 );
+			}
+			
+			else if ( llList2String ( message_list, 0 ) == "RESTORE" ) // PROBABLY DOESN'T WORK ANYMORE WITH CHANGES TO LINE-READING
+			{
+				CURRENT_LINE = (integer) llList2String ( message_list, 1 );
+				float value = (float) llList2String ( message_list, 2 );
+				
+				llInstantMessage ( USER_ID, (string) value );
+				
+				llSetTimerEvent ( value );
+				
+				display_text ( 1, (integer) value );
+			}
+		}
+		
+		else if ( number == REPORT_CHANNEL )
+		{
+			report ( message );
+		}
+	}
+	
+	http_request ( key id,string method,string body )
+	{
+		string values = llGetHTTPHeader ( id, "x-query-string" );
+		
+		llHTTPResponse ( id, 200, "XXX" );
+		
+		if ( values == "=stop" )
+		{
+			integer object_types_length = llGetListLength ( OBJECT_TYPES );
+			
+			for ( i = 0; i < object_types_length; i ++ )
+			{
+				process_notecard_data ( "#," + llList2String ( OBJECT_TYPES, CURRENT_LINE ) + ",ACTIVE,0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0" );
+			}
+			
+			llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "TERMINATE", NULL_KEY );
+			
+			state inactive;
+		}
+		
+		// llSay ( PUBLIC_CHANNEL, method );
+		// llSay ( PUBLIC_CHANNEL, body );
+	}
+	
+	timer (  )
+	{
+		// display_text ( 1, 0 );
+		// llSetTimerEvent ( 0.0 ); // Default read speed
+		
+		if ( llGetUnixTime (  ) >= DESTINATION_TIME )
+		{
+			key nQuery = llGetNotecardLine ( READING_NAME, CURRENT_LINE );
+		}
+	}
+	
+	dataserver ( key query, string data )
+	{
+		if ( data != EOF && ( MAX_LINE == -1 || MAX_LINE > CURRENT_LINE ) )
+		{
+			CURRENT_LINE ++;
+			report ( data );
+			
+			float add_time = process_notecard_data ( data );
+			
+			if ( add_time )
+			{
+				DESTINATION_TIME = llGetUnixTime (  ) + (integer) add_time;
+			}
+		}
+		
+		else if ( data != EOF ) // THIS BLOCK IS FOR THE CASE WHEN MAX_LINE IS REACHED - READ THE LINE AND THEN BREAK OUT
+		{
+			MAX_LINE = -1;
+			float add_time = process_notecard_data ( data );
+			
+			if ( add_time )
+			{
+				DESTINATION_TIME = llGetUnixTime (  ) + (integer) add_time;
+			}
+			
+			READING_NAMES = llList2List ( READING_NAMES, 0, -2 );
+			CURRENT_LINES = llList2List ( CURRENT_LINES, 0, -2 );
+			
+			READING_NAME = llList2String ( READING_NAMES, -1 );
+			CURRENT_LINE = llList2Integer ( CURRENT_LINES, -1 );
+			CURRENT_LINE_LEVEL --;
+		}
+		
+		else
+		{
+			if ( READING_NAME == SESSION_NAME )
+			{
+				llSetTimerEvent ( 0.0 );
+				report ( "FINISHED" );
+				
+				state inactive;
+			}
+			else
+			{
+				DESTINATION_TIME = llGetUnixTime (  ) + (integer) 0.01;
+				
+				READING_NAMES = llList2List ( READING_NAMES, 0, -2 );
+				CURRENT_LINES = llList2List ( CURRENT_LINES, 0, -2 );
+				
+				READING_NAME = llList2String ( READING_NAMES, -1 );
+				CURRENT_LINE = llList2Integer ( CURRENT_LINES, -1 );
+				CURRENT_LINE_LEVEL --;
+			}
+		}
+	}
+}
+

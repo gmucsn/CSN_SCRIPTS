@@ -1,0 +1,174 @@
+// ##################################################
+// ################# VEHICLE SCRIPT #################
+// ##################################################
+
+//   Instructions:
+//
+//        * Build any vehicle out of whatever prims you want, and then link them.
+//        * Build an invisible "wrapper" prim, create a new script in the object then paste this into it.
+//        * Link the vehicle to the wrapper prim, with the wrapper prim as the root prim.
+//        * Set the rotation of the wrapper prim to < 0, 0, 0 > and set its texture to "Blank".
+//        * Set the default action to "Sit" for the wrapper prim.
+//        * Rename the object you created to something you will remember, such as "VEHICLE".
+//        * Click the prim to sit in it, and drive around using the arrow keys!
+//
+//        * Enjoy!
+
+// ##################################################
+// #################### CHANNELS ####################
+// ##################################################
+
+
+
+
+// ##################################################
+// #################### VARIABLES ###################
+// ##################################################
+
+key USER_ID;
+string USER_NAME;
+
+integer RIDER_PRESENT = FALSE;
+
+
+// ##################################################
+// #################### FUNCTIONS ###################
+// ##################################################
+
+display_text (  )
+{
+    llSetText ( "", < 1.0, 1.0, 1.0 >, 1.0 );
+    
+    if ( RIDER_PRESENT == TRUE )
+    {
+        llSetText ( "PILOT: " + USER_NAME, < 1.0, 1.0, 1.0 >, 1.0 );
+    }
+}
+
+
+// ##################################################
+// #################### PROGRAM #####################
+// ##################################################
+
+default
+{
+    on_rez ( integer start_parameters ) 
+    {
+        llResetScript (  );
+    }
+
+    state_entry (  ) 
+    {
+        llSetStatus ( STATUS_PHANTOM, TRUE );  // Reduces CPU load on the sim server.
+        llVolumeDetect ( FALSE );  // Set to TRUE if you desire collision detection.
+
+        USER_ID = llGetOwner (  );
+        USER_NAME = llKey2Name ( USER_ID );
+
+        if ( llAvatarOnSitTarget (  ) != NULL_KEY )
+        {
+            RIDER_PRESENT = TRUE;
+        }
+        else
+        {
+            RIDER_PRESENT = FALSE;
+        }
+        
+        llSetSitText ( "Sit Here" );
+        
+        llSitTarget ( < 0.0, 0.0, 0.5 > , < 0.0, 0.0, 0.0, 1.0 > );
+        llSetCameraEyeOffset ( < -5.0, 0.0, 4.0 > );
+        llSetCameraAtOffset ( < 0.0, 0.0, 2.0 > );
+    
+        llCollisionSound ( "", 1.0 );
+        
+        display_text (  );
+    }
+
+    touch_start ( integer number ) 
+    {
+        if ( RIDER_PRESENT )
+        {
+            llUnSit ( USER_ID );
+        }
+    }
+
+    changed ( integer change ) 
+    {
+        USER_ID = llAvatarOnSitTarget (  );
+        USER_NAME = llKey2Name ( USER_ID );
+
+        if ( change & CHANGED_LINK ) 
+        {
+            if ( RIDER_PRESENT == TRUE ) 
+            {
+                llStopAnimation ( "sit_ground" );
+
+                RIDER_PRESENT = FALSE;
+                
+                display_text (  );
+                llSleep ( 1.0 );
+            }
+
+            else if ( RIDER_PRESENT == FALSE ) 
+            {
+                llRequestPermissions ( USER_ID, PERMISSION_TAKE_CONTROLS | PERMISSION_TRIGGER_ANIMATION );
+                
+                RIDER_PRESENT = TRUE;
+                
+                display_text (  );
+                llSleep ( 1.0 );
+            }
+        }
+    }
+
+    control ( key id, integer levels, integer edges ) 
+    {
+        if ( levels & CONTROL_FWD )
+        {
+            llSetRegionPos ( llGetPos (  ) + ( < 4.0, 0, 0 > ) * llGetRot (  ) );
+        }
+        if ( levels & CONTROL_BACK )
+        {
+            llSetRegionPos ( llGetPos (  ) + ( < -4.0, 0, 0 > ) * llGetRot (  ) );
+        }
+        if ( levels & CONTROL_LEFT || levels & CONTROL_ROT_LEFT )
+        {
+            llSetRot ( llEuler2Rot ( llRot2Euler ( llGetRot (  ) ) + < 0, 0, 25.0 > * DEG_TO_RAD ) );
+        }
+        if ( levels & CONTROL_RIGHT || levels & CONTROL_ROT_RIGHT )
+        {
+            llSetRot ( llEuler2Rot ( llRot2Euler ( llGetRot (  ) ) + < 0, 0, -25.0 > * DEG_TO_RAD ) );
+        }
+        if ( levels & CONTROL_UP )
+        {
+            llSetRegionPos ( llGetPos (  ) + ( < 0, 0, 4.0 > ) * llGetRot (  ) );
+        }
+        if ( levels & CONTROL_DOWN )
+        {
+            llSetRegionPos ( llGetPos (  ) + ( < 0, 0, -4.0 > ) * llGetRot (  ) );
+        }
+    }
+
+    run_time_permissions ( integer permissions ) 
+    {
+        if ( permissions & PERMISSION_TAKE_CONTROLS ) 
+        {
+            llTakeControls ( CONTROL_FWD | CONTROL_BACK | CONTROL_LEFT | CONTROL_RIGHT | CONTROL_ROT_LEFT | CONTROL_ROT_RIGHT | CONTROL_UP | CONTROL_DOWN, TRUE, FALSE );
+ 
+            display_text (  );
+        }
+
+        if ( permissions & PERMISSION_TRIGGER_ANIMATION ) 
+        {
+            llStartAnimation ( "pilot" );
+            llStopAnimation ( "sit" );
+        }
+
+        else
+        {
+            display_text (  );
+        }
+    }
+}
+
