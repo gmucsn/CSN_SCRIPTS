@@ -124,6 +124,56 @@ display_text ( integer active, integer time )
 	llSetText ( text, < 1.0, 1.0, 1.0 >, 1.0 );
 }
 
+string event_time ( integer time )
+{
+	string current = llGetTimestamp (  );
+	
+	integer hours = (integer) llGetSubString ( current, 11, 12 );
+	integer minutes = (integer) llGetSubString ( current, 14, 15 );
+	integer seconds = (integer) llGetSubString ( current, 17, 18 );
+	
+	integer hours_increment = time / 3600 + hours;
+	integer minutes_increment = ( time % 3600 ) / 60 + minutes;
+	integer seconds_increment = time % 60 + seconds;
+	
+	if ( seconds_increment > 59 )
+	{
+		minutes_increment += 1;
+		seconds_increment = seconds_increment % 60;
+	}
+	if ( minutes_increment > 59 )
+	{
+		hours_increment += 1;
+		minutes_increment = minutes_increment % 60;
+	}
+	if ( hours_increment > 23 )
+	{
+		hours_increment = hours_increment % 24;
+	}
+	
+	list increment_string = [ (string) hours_increment, (string) minutes_increment, (string) seconds_increment ];
+	integer increment_string_length = llGetListLength ( increment_string );
+	
+	for ( i = 0; i < increment_string_length; i ++ )
+	{
+		if ( llStringLength ( llList2String ( increment_string, i ) ) == 1 )
+		{
+			increment_string = llListReplaceList ( increment_string, [ "0" + llList2String ( increment_string, i ) ], i, i );
+		}
+	}
+	
+	return llList2String ( increment_string, 0 ) + ":" + llList2String ( increment_string, 1 ) + ":" + llList2String ( increment_string, 2 );
+}
+
+send_named_message ( integer channel, string message, string name )
+{
+	string old_name = llGetObjectName (  );
+	llSetObjectName ( "TO_" + name );
+	llRegionSay ( channel, message );
+	// llInstantMessage ( USER_ID, message );
+	llSetObjectName ( old_name );
+}
+
 string url_parser ( string url )
 {
 	string prefix = "http://74.63.237.42";
@@ -132,6 +182,114 @@ string url_parser ( string url )
 	string fixed = prefix + ":" + llList2String ( url_split, 2 );
 	
 	return fixed;
+}
+
+display_dialog_main (  ) // INACTIVE STATE
+{
+	CHOSEN_TYPE = "";
+	list dialog_list = [ "Session", "Treatment", "Players", "Exp Folder", "Ses Folder", "Round" ];
+	
+	if ( PLAYER_NAME && SESSION_NAME && TREATMENT_NAME )
+	{
+		dialog_list += [ "Start", "RLVOn", "RLVOff" ];
+	}
+	
+	if ( BACKUP_ON )
+	{
+		dialog_list += [ "Backup Off", "Clear Backup" ];
+	}
+	else
+	{
+		dialog_list += [ "Backup On", "Clear Backup" ];
+	}
+	
+	// FOR AESTHETIC PURPOSES
+	if ( SESSION_NAME )
+	{
+		SESSION_NAME = llDeleteSubString ( SESSION_NAME, -8, -1 );
+	}
+	if ( PLAYER_NAME )
+	{
+		PLAYER_NAME = llDeleteSubString ( PLAYER_NAME, -8, -1 );
+	}
+	
+	llDialog ( USER_ID, "Session: " + SESSION_NAME + "\nTreatment: " + TREATMENT_NAME + "\nPlayers: " + PLAYER_NAME + "\nExperiment Folder: " + EXPERIMENT_FOLDER + "\nSession Folder: " + SESSION_FOLDER + "\nStarting Round: " + (string) STARTING_LOOP_COUNTER + "\n \nPlease choose an action:", dialog_list, ADMIN_CHANNEL );
+	
+	// FOR AESTHETIC PURPOSES
+	if ( SESSION_NAME )
+	{
+		SESSION_NAME = SESSION_NAME + ".Session";
+	}
+	if ( PLAYER_NAME )
+	{
+		PLAYER_NAME = PLAYER_NAME + ".Players";
+	}
+}
+
+display_dialog_sublist ( key user_id, string type )  // INACTIVE STATE
+{
+	DIALOG_LIST = [  ];
+	
+	integer number_of_notecards = llGetInventoryNumber ( INVENTORY_NOTECARD );
+	
+	for ( i = 0; i < number_of_notecards; i ++ )
+	{
+		string full_name = llGetInventoryName ( INVENTORY_NOTECARD, i );
+		
+		if ( llGetListLength ( llParseString2List ( full_name, [ "." ], [  ] ) ) > 1 )
+		{
+			string card_type = llList2String ( llParseString2List ( full_name, [ "." ], [  ] ), 1 );
+			string card_name = llList2String ( llParseString2List ( full_name, [ "." ], [  ] ), 0 );
+
+			if ( type == card_type )
+			{
+				DIALOG_LIST += card_name;
+			}
+		}
+	}
+	
+	llDialog ( USER_ID, "Which " + type + " file do you wish to use?", DIALOG_LIST, ADMIN_CHANNEL );
+}
+
+update_treatment (  )
+{
+	display_text ( 0, 0 );
+
+	TREATMENT_LIST = [  ];
+	integer treatment_name_length = llStringLength ( TREATMENT_NAME );
+	
+	for ( i = 0; i < treatment_name_length; i ++ )
+	{
+		TREATMENT_LIST += "";
+		integer number_of_notecards = llGetInventoryNumber ( INVENTORY_NOTECARD );	
+		
+		for ( j = 0; j < number_of_notecards; j ++ )
+		{
+			string full_name = llGetInventoryName ( INVENTORY_NOTECARD, j );
+			string match = llGetSubString ( TREATMENT_NAME, i, i );
+			
+			if ( llGetSubString ( full_name, 0, 0 ) == (string) ( i + 1 ) && llGetSubString ( full_name, 2, 2 ) == match && llSubStringIndex ( full_name, ".Treatment" ) > -1 )
+			{
+				TREATMENT_LIST = llListReplaceList ( TREATMENT_LIST, [ full_name ], -1, -1 );
+				
+				if ( USER_ID )
+				{
+					llInstantMessage ( USER_ID, "Match found at " + (string) ( i + 1 ) );
+				}
+			}
+		}
+		
+		if ( llList2String ( TREATMENT_LIST, -1 ) == "" )
+		{
+			if ( USER_ID )
+			{
+				llInstantMessage ( USER_ID, "Error: No match found at " + (string) ( i + 1 ) );
+			}
+			
+			TREATMENT_NAME = "";
+			display_text ( 0, 0 );
+		}
+	}
 }
 
 float process_notecard_data ( string data ) 
@@ -281,69 +439,25 @@ float process_notecard_data ( string data )
 	return 0.01;
 }
 
-display_dialog_main (  )
+report ( string data )
 {
-	CHOSEN_TYPE = "";
-	list dialog_list = [ "Session", "Treatment", "Players", "Exp Folder", "Ses Folder", "Round" ];
+	// llOwnerSay ( data );
 	
-	if ( PLAYER_NAME && SESSION_NAME && TREATMENT_NAME )
+	data = llGetUnixTime (  ) + "," + data;
+	
+	if ( EXPERIMENT_FOLDER && SESSION_FOLDER )
 	{
-		dialog_list += [ "Start", "RLVOn", "RLVOff" ];
+		llHTTPRequest ( RECORD_URL, [ HTTP_METHOD, "POST" ], data );
 	}
 	
-	if ( BACKUP_ON )
+	if ( MESSAGE_TYPE == "Report_All" && USER_ID )
 	{
-		dialog_list += [ "Backup Off", "Clear Backup" ];
+		llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
 	}
-	else
+	else if ( MESSAGE_TYPE == "Report_Chat" && llSubStringIndex ( data, ",CHAT," ) > 0 && USER_ID )
 	{
-		dialog_list += [ "Backup On", "Clear Backup" ];
+		llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
 	}
-	
-	if ( SESSION_NAME )
-	{
-		SESSION_NAME = llDeleteSubString ( SESSION_NAME, -8, -1 );
-	}
-	if ( PLAYER_NAME )
-	{
-		PLAYER_NAME = llDeleteSubString ( PLAYER_NAME, -8, -1 );
-	}
-	
-	llDialog ( USER_ID, "Session: " + SESSION_NAME + "\nTreatment: " + TREATMENT_NAME + "\nPlayers: " + PLAYER_NAME + "\nExperiment Folder: " + EXPERIMENT_FOLDER + "\nSession Folder: " + SESSION_FOLDER + "\nStarting Round: " + (string) STARTING_LOOP_COUNTER + "\n \nPlease choose an action:", dialog_list, ADMIN_CHANNEL );
-	
-	if ( SESSION_NAME )
-	{
-		SESSION_NAME = SESSION_NAME + ".Session";
-	}
-	if ( PLAYER_NAME )
-	{
-		PLAYER_NAME = PLAYER_NAME + ".Players";
-	}
-}
-
-display_dialog_sublist ( key user_id, string type )
-{
-	DIALOG_LIST = [  ];
-	
-	integer number_of_notecards = llGetInventoryNumber ( INVENTORY_NOTECARD );
-	
-	for ( i = 0; i < number_of_notecards; i ++ )
-	{
-		string full_name = llGetInventoryName ( INVENTORY_NOTECARD, i );
-		
-		if ( llGetListLength ( llParseString2List ( full_name, [ "." ], [  ] ) ) > 1 )
-		{
-			string card_type = llList2String ( llParseString2List ( full_name, [ "." ], [  ] ), 1 );
-			string card_name = llList2String ( llParseString2List ( full_name, [ "." ], [  ] ), 0 );
-
-			if ( type == card_type )
-			{
-				DIALOG_LIST += card_name;
-			}
-		}
-	}
-	
-	llDialog ( USER_ID, "Which " + type + " file do you wish to use?", DIALOG_LIST, ADMIN_CHANNEL );
 }
 
 start_experiment (  )
@@ -405,118 +519,6 @@ terminate_experiment (  )
 	state default;
 }
 
-update_treatment (  )
-{
-	display_text ( 0, 0 );
-
-	TREATMENT_LIST = [  ];
-	integer treatment_name_length = llStringLength ( TREATMENT_NAME );
-	
-	for ( i = 0; i < treatment_name_length; i ++ )
-	{
-		TREATMENT_LIST += "";
-		integer number_of_notecards = llGetInventoryNumber ( INVENTORY_NOTECARD );	
-		
-		for ( j = 0; j < number_of_notecards; j ++ )
-		{
-			string full_name = llGetInventoryName ( INVENTORY_NOTECARD, j );
-			string match = llGetSubString ( TREATMENT_NAME, i, i );
-			
-			if ( llGetSubString ( full_name, 0, 0 ) == (string) ( i + 1 ) && llGetSubString ( full_name, 2, 2 ) == match && llSubStringIndex ( full_name, ".Treatment" ) > -1 )
-			{
-				TREATMENT_LIST = llListReplaceList ( TREATMENT_LIST, [ full_name ], -1, -1 );
-				
-				if ( USER_ID )
-				{
-					llInstantMessage ( USER_ID, "Match found at " + (string) ( i + 1 ) );
-				}
-			}
-		}
-		
-		if ( llList2String ( TREATMENT_LIST, -1 ) == "" )
-		{
-			if ( USER_ID )
-			{
-				llInstantMessage ( USER_ID, "Error: No match found at " + (string) ( i + 1 ) );
-			}
-			
-			TREATMENT_NAME = "";
-			display_text ( 0, 0 );
-		}
-	}
-}
-
-send_named_message ( integer channel, string message, string name )
-{
-	string old_name = llGetObjectName (  );
-	llSetObjectName ( "TO_" + name );
-	llRegionSay ( channel, message );
-	// llInstantMessage ( USER_ID, message );
-	llSetObjectName ( old_name );
-}
-
-string event_time ( integer time )
-{
-	string current = llGetTimestamp (  );
-	
-	integer hours = (integer) llGetSubString ( current, 11, 12 );
-	integer minutes = (integer) llGetSubString ( current, 14, 15 );
-	integer seconds = (integer) llGetSubString ( current, 17, 18 );
-	
-	integer hours_increment = time / 3600 + hours;
-	integer minutes_increment = ( time % 3600 ) / 60 + minutes;
-	integer seconds_increment = time % 60 + seconds;
-	
-	if ( seconds_increment > 59 )
-	{
-		minutes_increment += 1;
-		seconds_increment = seconds_increment % 60;
-	}
-	if ( minutes_increment > 59 )
-	{
-		hours_increment += 1;
-		minutes_increment = minutes_increment % 60;
-	}
-	if ( hours_increment > 23 )
-	{
-		hours_increment = hours_increment % 24;
-	}
-	
-	list increment_string = [ (string) hours_increment, (string) minutes_increment, (string) seconds_increment ];
-	integer increment_string_length = llGetListLength ( increment_string );
-	
-	for ( i = 0; i < increment_string_length; i ++ )
-	{
-		if ( llStringLength ( llList2String ( increment_string, i ) ) == 1 )
-		{
-			increment_string = llListReplaceList ( increment_string, [ "0" + llList2String ( increment_string, i ) ], i, i );
-		}
-	}
-	
-	return llList2String ( increment_string, 0 ) + ":" + llList2String ( increment_string, 1 ) + ":" + llList2String ( increment_string, 2 );
-}
-
-report ( string data )
-{
-	// llOwnerSay ( data );
-	
-	data = llGetUnixTime (  ) + "," + data;
-	
-	if ( EXPERIMENT_FOLDER && SESSION_FOLDER )
-	{
-		llHTTPRequest ( RECORD_URL, [ HTTP_METHOD, "POST" ], data );
-	}
-	
-	if ( MESSAGE_TYPE == "Report_All" && USER_ID )
-	{
-		llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
-	}
-	else if ( MESSAGE_TYPE == "Report_Chat" && llSubStringIndex ( data, ",CHAT," ) > 0 && USER_ID )
-	{
-		llRegionSayTo ( USER_ID, PUBLIC_CHANNEL, llGetUnixTime (  ) + "," + data );
-	}
-}
-
 
 // ##################################################
 // #################### PROGRAM #####################
@@ -558,12 +560,13 @@ state inactive
 {
 	state_entry (  )
 	{
-		PAUSED = 0;
-		integer LISTEN_HANDLE_ADMIN = llListen ( ADMIN_CHANNEL, "", llGetOwner (  ), "" );
-		
 		display_text ( 0, 0 );
 		
-		RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&session=" + "UNLABELED" + "&experiment=" + "LOST" + "_" + llGetUnixTime (  );
+		// RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&experiment=" + "LOST" + "&session=" + "UNLABELED" + "_" + llGetUnixTime (  );
+		
+		PAUSED = 0;
+		
+		integer LISTEN_HANDLE_ADMIN = llListen ( ADMIN_CHANNEL, "", llGetOwner (  ), "" );
 	}
 	
 	touch_start ( integer number )
@@ -583,12 +586,6 @@ state inactive
 			if ( message == "Start" )
 			{
 				start_experiment (  );
-			}
-			
-			// TERMINATE EXPERIMENT
-			else if ( message == "Terminate" )
-			{
-				terminate_experiment (  );
 			}
 			
 			// REQUEST NEW URL
@@ -779,7 +776,7 @@ state active
 	{
 		display_text ( 1, 0 );
 		
-		RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&session=" + SESSION_FOLDER + "&experiment=" + EXPERIMENT_FOLDER + "_" + (string) llGetUnixTime (  );
+		RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&experiment=" + EXPERIMENT_FOLDER + "&session=" + SESSION_FOLDER + "_" + (string) llGetUnixTime (  );
 		
 		READING_NAMES = [ SESSION_NAME ];
 		CURRENT_LINES = [ 0 ];
@@ -831,16 +828,17 @@ state active
 				terminate_experiment (  );
 			}
 			
+			// RLV CONTROLS
 			else if ( message == "RLVOn" )
 			{
 				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1;1", "HUD" );
 			}
-			
 			else if ( message == "RLVOff" )
 			{
 				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0", "HUD" );
 			}
 			
+			// PAUSE AND UNPAUSE
 			else if ( message == "Pause" )
 			{
 				PAUSED = DESTINATION_TIME - llGetUnixTime (  );
@@ -850,23 +848,26 @@ state active
 					PAUSED = 1;
 				}
 				
+				llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "PAUSE", NULL_KEY );
 				llSetTimerEvent ( 0.0 );
 			}
-			
 			else if ( message == "Unpause" )
 			{
 				DESTINATION_TIME = llGetUnixTime (  ) + PAUSED;
 				PAUSED = 0;
 				
+				llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "UNPAUSE", NULL_KEY );
 				llSetTimerEvent ( 1.0 );
 			}
 			
+			// CHANGE MESSAGE_TYPE
 			else if ( llListFindList ( [ "Report_All", "Report_Chat", "Report_Off" ], [ message ] ) > -1 )
 			{
 				MESSAGE_TYPE = message;
 			}
 			
-			else if ( message == "Next" ) // SKIPS TO NEXT LINE IN THE PARAMETER FILE WITHOUT WAITING
+			// MOVE TO NEXT EVENT ( SKIPS TO NEXT LINE IN THE PARAMETER FILE WITHOUT WAITING )
+			else if ( message == "Next" )
 			{
 				DESTINATION_TIME = 0;
 			}
@@ -884,6 +885,7 @@ state active
 		{
 			list message_list = llCSV2List ( message );
 			
+			// FOR IN-WORLD TRIGGERS THAT MOVE THE READER TO THE NEXT LINE
 			if ( message == "Next" )
 			{
 				DESTINATION_TIME = 0;
