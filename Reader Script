@@ -1,9 +1,12 @@
 // ##################################################
 // ##################################################
-// ############### READER SCRIPT (4.2) ##############
+// ################## READER SCRIPT #################
 // ##################################################
 // ##################################################
 
+// VERSION 4.3
+
+// 4.3: ADDED FUNCTIONALITY FOR STORING AND CHECKING ACTIVE PLAYERS
 // 4.2: FIXED HOW THE SCRIPT CONNECTS TO THE EC2 SERVER
 // 4.1: ARBITRARY NOTECARD RECURSION AND SIMPLIFIED NOTECARD READING
 // 4.0: MERGED PETER AND EVANS VERSIONS
@@ -41,7 +44,8 @@ string SESSION_NAME; // NAME OF .Session NOTECARD FROM DialogBox
 list TREATMENT_LIST; // Tracks list of all .Treatment NOTECARDS
 string TREATMENT_NAME; // NAME OF .Treatment NOTECARD FROM TextBox
 string PLAYER_NAME; // NAME OF .Player NOTECARD FROM DialogBox
-list PLAYER_LIST; // STORES PLAYER NAMES FOR INSTRUCTIONS
+list PLAYER_LIST_NAMES; // STORES PLAYER NAMES FOR INSTRUCTIONS
+list PLAYER_LIST_KEYS; // SHOULD BE SORTED IN ASCENDING ORDER FOR COMPARISON
 
 string READING_NAME; // NAME OF NOTECARD ACTUALLY BEING READ
 string CHOSEN_TYPE; // WHAT TYPE OF NOTECARD IS BEING CONSIDERED
@@ -57,6 +61,7 @@ string METAMASTER_URL = "http://slmetamaster.appspot.com/register";
 
 integer DESTINATION_TIME;
 integer PAUSED;
+//integer PAUSE_CHECK;
 
 list READING_NAMES = [ "" ]; // LIST OF EACH NESTED NOTECARD NAME
 list CURRENT_LINES = [ 0 ]; // LIST OF CURRENT LINES FOR EACH LEVEL OF NOTECARD RECURSION
@@ -82,6 +87,28 @@ integer BACKUP_ON;
 start_up (  )
 {
 	llRequestURL (  );
+}
+
+pause (  )
+{
+	PAUSED = DESTINATION_TIME - llGetUnixTime (  );
+	
+	if ( PAUSED < 1 )
+	{
+		PAUSED = 1;
+	}
+	
+	llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "PAUSE", NULL_KEY );
+	llSetTimerEvent ( 0.0 );
+}
+
+unpause (  )
+{
+	DESTINATION_TIME = llGetUnixTime (  ) + PAUSED;
+	PAUSED = 0;
+	
+	llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "UNPAUSE", NULL_KEY );
+	llSetTimerEvent ( 1.0 );
 }
 
 display_text ( integer active, integer time )
@@ -184,7 +211,7 @@ string url_parser ( string url )
 	return fixed;
 }
 
-display_dialog_main (  ) // INACTIVE STATE
+display_dialog_main (  ) // CALED IN INACTIVE STATE
 {
 	CHOSEN_TYPE = "";
 	list dialog_list = [ "Session", "Treatment", "Players", "Exp Folder", "Ses Folder", "Round" ];
@@ -202,6 +229,15 @@ display_dialog_main (  ) // INACTIVE STATE
 	{
 		dialog_list += [ "Backup On", "Clear Backup" ];
 	}
+	
+	/*if ( PAUSE_CHECK )
+	{
+		dialog_list += [ "Check Off" ];
+	}
+	else
+	{
+		dialog_list += [ "Check On" ];
+	}*/
 	
 	// FOR AESTHETIC PURPOSES
 	if ( SESSION_NAME )
@@ -226,7 +262,7 @@ display_dialog_main (  ) // INACTIVE STATE
 	}
 }
 
-display_dialog_sublist ( key user_id, string type )  // INACTIVE STATE
+display_dialog_sublist ( key user_id, string type )  // CALLED IN INACTIVE STATE
 {
 	DIALOG_LIST = [  ];
 	
@@ -305,7 +341,7 @@ float process_notecard_data ( string data )
 		string value = llList2String ( data_list, 1 );
 		
 		display_text ( 1, (integer) value );
-		llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "LINE," + (string) CURRENT_LINE + "," + value, NULL_KEY );
+		llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "READER_STATUS," + llList2CSV ( [ CURRENT_LINE, LOOP_LINE, LOOP_COUNTER, STARTING_LOOP_COUNTER, BREAK ] ) + "," + value, NULL_KEY ); // FOR THE MASTER BACKUP STRING
 		
 		return (float) value;
 	}
@@ -387,6 +423,16 @@ float process_notecard_data ( string data )
 			REPORT_CHANNEL = llList2Integer ( data_list, 6 );
 		}
 		
+		if ( command_type == "PLAYER_KEYS" )
+		{
+			if ( (integer) llList2String ( data_list, 2 ) == 0 ) // SINCE KEYS ARE LONG, WILL TEND TO GO OVER 256 CHARS. IF EXTEND IS TRUE, THIS ADDS THE KEYS TO THE LIST RATHER THAN CREATING A NEW LIST.
+			{
+				PLAYER_LIST_KEYS = [  ]; 
+			}
+			
+			PLAYER_LIST_KEYS += llParseString2List ( llList2String ( data_list , 3 ) , [ ";" ], [  ] );
+		}
+		
 		// DETERMINES LIST OF OBJECT TYPES THAT WILL RECEIVE TERMINATE MESSAGES
 		else if ( command_type == "TYPES" )
 		{
@@ -422,10 +468,10 @@ float process_notecard_data ( string data )
 		}
 		
 		// USED FOR RESTORING BACKED UP DATA FROM THE MASTERBOX
-		else if ( command_type == "BACKUP" )
+		else if ( command_type == "BACKUP" && BACKUP_ON )
 		{
 			// llSetTimerEvent ( 0.0 ); // STOPS READING UNTIL BACKUP REPORTS BACK
-			llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "RESTORE_BACKUP," + (string) BACKUP_ON, NULL_KEY );
+			llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "RESTORE_BACKUP", NULL_KEY );
 			
 			BACKUP_ON = 0;
 		}
@@ -501,6 +547,8 @@ terminate_experiment (  )
 	// TREATMENT_NAME = "";
 	// EXPERIMENT_FOLDER = "";
 	// SESSION_FOLDER = "";
+	// PLAYER_LIST_NAMES = [  ];
+	// PLAYER_LIST_KEYS = [  ];
 	
 	READING_NAMES = [ SESSION_NAME ];
 	CURRENT_LINES = [ 0 ];
@@ -562,9 +610,10 @@ state inactive
 	{
 		display_text ( 0, 0 );
 		
-		// RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&experiment=" + "LOST" + "&session=" + "UNLABELED" + "_" + llGetUnixTime (  );
+		// RECORD_URL = RECORD_URL_BASE + "secret_key=" + RECORD_URL_KEY + "&experiment=" + "UNLABELED" + "&session=" + "UNLABELED" + "_" + llGetUnixTime (  );
 		
 		PAUSED = 0;
+		PLAYER_LIST_KEYS = [  ];
 		
 		integer LISTEN_HANDLE_ADMIN = llListen ( ADMIN_CHANNEL, "", llGetOwner (  ), "" );
 	}
@@ -611,6 +660,18 @@ state inactive
 				display_dialog_main (  );
 			}
 			
+			// TOGGLE PAUSE EXPERIMENT IF AVATAR SIGNS OFF (IF YOU DEFINE KEYS, AUTOMATICALLY MOVE TO "Check On" STATUS)
+			/*else if ( message == "Check Off" )
+			{
+				PAUSE_CHECK = 0;
+				display_dialog_main (  );
+			}
+			else if ( message == "Check On" )
+			{
+				PAUSE_CHECK = 1;
+				display_dialog_main (  );
+			}*/
+			
 			// RLV CONTROLS
 			else if ( message == "RLVOn" )
 			{
@@ -629,6 +690,7 @@ state inactive
 				CHOSEN_TYPE = message;
 				display_dialog_sublist ( USER_ID, message );
 			}
+			
 			else if ( message == "Treatment" )
 			{
 				CHOSEN_TYPE = message;
@@ -696,6 +758,7 @@ state inactive
 				CHOSEN_TYPE = "";
 				display_dialog_main (  );
 			}
+			
 			else if ( CHOSEN_TYPE == "Exp Folder" || CHOSEN_TYPE == "Ses Folder" )
 			{
 				if ( CHOSEN_TYPE == "Exp Folder" )
@@ -812,6 +875,16 @@ state active
 				dialog_message = SESSION_NAME + " running. Please choose an option.";
 			}
 			
+			// TOGGLE PAUSE EXPERIMENT IF AVATAR SIGNS OFF 
+			/*if ( PAUSE_CHECK )
+			{
+				dialog_list += [ "Check Off" ];
+			}
+			else
+			{
+				dialog_list += [ "Check On" ];
+			}*/
+			
 			dialog_list += [ "Next", "Terminate", "RLVOn", "RLVOff" ];
 			
 			llDialog ( llDetectedKey ( 0 ), SESSION_NAME + " running. Please choose an option:", dialog_list, ADMIN_CHANNEL );
@@ -838,26 +911,22 @@ state active
 				send_named_message ( PRIVATE_CHANNEL, "CONTROLS,0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0", "HUD" );
 			}
 			
+			// TOGGLE PAUSE EXPERIMENT IF AVATAR SIGNS OFF 
+			/*else if ( message == "Check Off" ) {
+				PAUSE_CHECK = 0;
+			}
+			else if ( message == "Check On" ) {
+				PAUSE_CHECK = 1;
+			}*/
+			
 			// PAUSE AND UNPAUSE
 			else if ( message == "Pause" )
 			{
-				PAUSED = DESTINATION_TIME - llGetUnixTime (  );
-				
-				if ( PAUSED < 1 )
-				{
-					PAUSED = 1;
-				}
-				
-				llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "PAUSE", NULL_KEY );
-				llSetTimerEvent ( 0.0 );
+				pause (  );
 			}
 			else if ( message == "Unpause" )
 			{
-				DESTINATION_TIME = llGetUnixTime (  ) + PAUSED;
-				PAUSED = 0;
-				
-				llMessageLinked ( LINK_THIS, PUBLIC_CHANNEL, "UNPAUSE", NULL_KEY );
-				llSetTimerEvent ( 1.0 );
+				unpause (  );
 			}
 			
 			// CHANGE MESSAGE_TYPE
@@ -894,6 +963,12 @@ state active
 			else if ( llList2String ( message_list, 0 ) == "BREAK" )
 			{
 				BREAK = (integer) llList2String ( message_list, 1 );
+			}
+			
+			else if ( llList2String ( message_list, 0 ) == "COMMAND" )
+			{
+				string chopped = llList2CSV ( llList2List ( message_list , 1 , -1 )); // ENTRY 1 SHOULD BE THE COMMAND TYPE.
+				process_notecard_data ( chopped );
 			}
 			
 			else if ( llList2String ( message_list, 0 ) == "RESTORE" ) // PROBABLY DOESN'T WORK ANYMORE WITH CHANGES TO LINE-READING
@@ -947,6 +1022,25 @@ state active
 		if ( llGetUnixTime (  ) >= DESTINATION_TIME )
 		{
 			key nQuery = llGetNotecardLine ( READING_NAME, CURRENT_LINE );
+		}
+		
+		if ( PLAYER_LIST_KEYS != [  ] && !PAUSED )
+		{
+			list detected_agent_keys = llGetAgentList ( AGENT_LIST_REGION, [  ] );
+			integer number_of_players = llGetListLength ( PLAYER_LIST_KEYS );
+			
+			for ( i = 0 ; i < number_of_players ; i ++ )
+			{
+				key match_key = llList2Key ( PLAYER_LIST_KEYS , i );
+				integer match_index = llListFindList ( detected_agent_keys, [ match_key ] );
+				
+				if ( match_index == -1 )
+				{
+					pause (  );
+					llInstantMessage ( USER_ID, "Failed to find " + llKey2Name ( match_key ) + "! Pausing experiment!" );
+					break;
+				}
+			}
 		}
 	}
 	
